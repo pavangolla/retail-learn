@@ -1,0 +1,41 @@
+# Local development infrastructure for Retail-Learn.
+# Local learning use only: no authentication, bound to localhost.
+#
+# Start:  docker compose up -d
+# Stop:   docker compose down        (add -v to delete data)
+
+services:
+  mongo:
+    image: mongo:7
+    container_name: retail-mongo
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: retail-redis
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Phase 4: add Kafka (KRaft mode, single broker) here when events are introduced.
+
+volumes:
+  mongo_data:
+  redis_data:

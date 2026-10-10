@@ -24,7 +24,7 @@ Future services (cart, order, inventory, account, notification) go in `services/
 ## Commands
 - Start infra: `docker compose up -d` (MongoDB on 27017, Redis on 6379)
 - Stop infra: `docker compose down` (add `-v` to wipe data)
-- First-time web setup: `./scripts/setup-web.sh` (runs create-next-app, applies the Phase 0 page; needs internet)
+- First-time web setup: `cd web && npm install` (needs internet). Create `web/.env.local` with `CATALOG_URL=http://localhost:8081`
 - Frontend: `cd web && npm run dev` (http://localhost:3000)
 - Catalog service: `cd services/catalog && go run .` (http://localhost:8081, env: `PORT`, `MONGO_ADDR`; see `.env.example`)
 - Health check: `curl -i localhost:8081/health` (200 when Mongo is reachable, 503 when not)
@@ -54,7 +54,7 @@ Future services (cart, order, inventory, account, notification) go in `services/
 6. Update this file when a decision, command, or convention changes.
 
 ## Roadmap
-- [ ] Phase 0: foundations (repo, compose, scaffold web and catalog, web calls `/health`) — Go service done and tested; run `./scripts/setup-web.sh` to finish the web side, then tick this
+- [x] Phase 0: foundations (repo, compose, scaffold web and catalog, web calls `/health`)
 - [ ] Phase 1: catalog and storefront (products, variants, collections, search, seed data)
 - [ ] Phase 2: cart (Redis) and accounts (auth, profile, addresses)
 - [ ] Phase 3: checkout, Stripe test payments, orders

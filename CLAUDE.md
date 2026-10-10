@@ -24,7 +24,7 @@ Future services (cart, order, inventory, account, notification) go in `services/
 ## Commands
 - Start infra: `docker compose up -d` (MongoDB on 27017, Redis on 6379)
 - Stop infra: `docker compose down` (add `-v` to wipe data)
-- First-time web setup: `./scripts/setup-web.sh` (runs create-next-app, applies the Phase 0 page; needs internet)
+- First-time web setup: `cd web && npm install` (needs internet). Create `web/.env.local` with `CATALOG_URL=http://localhost:8081`
 - Frontend: `cd web && npm run dev` (http://localhost:3000)
 - Catalog service: `cd services/catalog && go run .` (http://localhost:8081, env: `PORT`, `MONGO_ADDR`; see `.env.example`)
 - Health check: `curl -i localhost:8081/health` (200 when Mongo is reachable, 503 when not)
@@ -54,7 +54,7 @@ Future services (cart, order, inventory, account, notification) go in `services/
 6. Update this file when a decision, command, or convention changes.
 
 ## Roadmap
-- [ ] Phase 0: foundations (repo, compose, scaffold web and catalog, web calls `/health`) — Go service done and tested; run `./scripts/setup-web.sh` to finish the web side, then tick this
+- [x] Phase 0: foundations (repo, compose, scaffold web and catalog, web calls `/health`)
 - [ ] Phase 1: catalog and storefront (products, variants, collections, search, seed data)
 - [ ] Phase 2: cart (Redis) and accounts (auth, profile, addresses)
 - [ ] Phase 3: checkout, Stripe test payments, orders
@@ -67,3 +67,4 @@ Future services (cart, order, inventory, account, notification) go in `services/
 - 2026-10-09: Chose Next.js + Go + MongoDB + Redis. Kafka deferred to Phase 4.
 - 2026-10-10: Catalog `/health` checks Mongo with a plain TCP dial (stdlib only) for Phase 0. Swap to the official Mongo driver's `Ping` in Phase 1 when the service starts storing data (`go get go.mongodb.org/mongo-driver/v2/mongo`). Next.js calls the Go service from server components, never from the browser.
 - 2026-10-10: Cloud sessions here cannot reach the npm registry or the Go module proxy (org egress policy). Anything needing `npm install` or `go get` is run on the local machine.
+- 2026-10-10: Next.js 16 scaffold enables `cacheComponents`. Do not use `export const dynamic`; wrap components that fetch live data (calls to Go services) in `<Suspense>`, and only use `"use cache"` where caching is intended.

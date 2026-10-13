@@ -72,7 +72,7 @@ Future services (cart, order, inventory, account, notification) go in `services/
 ## Roadmap
 - [x] Phase 0: foundations (repo, compose, scaffold web and catalog, web calls `/health`)
 - [ ] Phase 1: catalog and storefront
-  - [ ] 1a: data model, Mongo store, seed data, `/products` and `/products/{handle}` (code written; needs `go get` + Mongo integration run on the local machine)
+  - [x] 1a: data model, Mongo store, seed data, `/products` and `/products/{handle}` (Mongo integration tests and seed run verified locally)
   - [ ] 1b: tag-based collections, filters (type, tag, price), sort, text search
   - [ ] 1c: storefront pages (collection, product with variant selector, search) and placeholder SVGs
 - [ ] Phase 2: cart (Redis) and accounts (auth, profile, addresses)

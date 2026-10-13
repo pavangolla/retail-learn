@@ -4,9 +4,11 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"net"
+	"log"
 	"net/http"
 	"time"
+
+	"github.com/pavangolla/retail-learn/services/catalog/internal/catalog"
 )
 
 // Pinger reports whether a dependency is reachable.
@@ -15,28 +17,22 @@ type Pinger interface {
 	Ping(ctx context.Context) error
 }
 
-// TCPPinger checks that something accepts connections on Addr.
-// Phase 0 uses this for MongoDB. In Phase 1 it gets replaced by the
-// real driver's Ping once the catalog actually stores data.
-type TCPPinger struct {
-	Addr string
+// Deps is everything the HTTP layer needs. main.go builds it; tests build
+// it from fakes and the in-memory repository.
+type Deps struct {
+	Mongo   Pinger
+	Catalog *catalog.Service
 }
 
-// Ping dials Addr and closes the connection immediately.
-func (p TCPPinger) Ping(ctx context.Context) error {
-	var d net.Dialer
-	conn, err := d.DialContext(ctx, "tcp", p.Addr)
-	if err != nil {
-		return err
-	}
-	return conn.Close()
-}
-
-// New returns the service's HTTP handler.
-func New(mongo Pinger) http.Handler {
+// New returns the service's HTTP handler with middleware applied.
+func New(d Deps) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", healthHandler(mongo))
-	return mux
+	mux.HandleFunc("GET /health", healthHandler(d.Mongo))
+	mux.HandleFunc("GET /products", listProductsHandler(d.Catalog))
+	mux.HandleFunc("GET /products/{handle}", getProductHandler(d.Catalog))
+
+	// Order matters: logging wraps recovery so a panic still gets logged as a 500.
+	return logRequests(recoverPanics(mux))
 }
 
 type healthResponse struct {
@@ -60,9 +56,24 @@ func healthHandler(mongo Pinger) http.HandlerFunc {
 			resp.Mongo = "down"
 			code = http.StatusServiceUnavailable
 		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(code)
-		_ = json.NewEncoder(w).Encode(resp)
+		writeJSON(w, code, resp)
 	}
+}
+
+// writeJSON sends v as JSON with the given status code.
+func writeJSON(w http.ResponseWriter, code int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		log.Printf("write response: %v", err)
+	}
+}
+
+type errorResponse struct {
+	Error string `json:"error"`
+}
+
+// writeError sends the standard error body: {"error": "message"}.
+func writeError(w http.ResponseWriter, code int, msg string) {
+	writeJSON(w, code, errorResponse{Error: msg})
 }

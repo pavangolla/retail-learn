@@ -130,6 +130,12 @@ func build(i int, s spec, created time.Time) catalog.Product {
 	sizes := sizeSets[s.sizes]
 
 	tags := []string{s.gender, s.fabric, s.occasion, slug(s.ptype)}
+	switch s.image {
+	case "footwear":
+		tags = append(tags, "footwear")
+	case "jewelry", "dupatta", "bag":
+		tags = append(tags, "accessories")
+	}
 	if s.sale {
 		tags = append(tags, "sale")
 	}
@@ -221,4 +227,28 @@ func code(s string, n int) string {
 		out = out[:n]
 	}
 	return out
+}
+
+// Collections returns the sample collections. A collection here is a rule, not
+// a list: it shows every active product carrying its tag (a Shopify "smart
+// collection"), so adding a tag to a product moves it into the collection with
+// no other edit.
+func Collections() []catalog.Collection {
+	return []catalog.Collection{
+		{Handle: "women", Title: "Women", Tag: "women", Description: "Sarees, kurta sets, tunics, lehengas and more for women."},
+		{Handle: "men", Title: "Men", Tag: "men", Description: "Kurtas, sherwanis, jackets and shirts for men."},
+		{Handle: "girls", Title: "Girls", Tag: "girls", Description: "Traditional outfits for little ones."},
+		{Handle: "sale", Title: "Sale", Tag: "sale", Description: "Marked-down favourites."},
+		{Handle: "best-sellers", Title: "Best Sellers", Tag: "best-seller", Description: "What shoppers buy most."},
+		{Handle: "festive-wear", Title: "Festive Wear", Tag: "festive", Description: "Outfits for festivals and celebrations."},
+		{Handle: "wedding-edit", Title: "Wedding Edit", Tag: "wedding", Description: "Bridal and wedding-guest pieces."},
+		{Handle: "party-wear", Title: "Party Wear", Tag: "party", Description: "Standout looks for the evening."},
+		{Handle: "casual", Title: "Casual", Tag: "casual", Description: "Easy everyday wear."},
+		{Handle: "silk", Title: "Silk", Tag: "silk", Description: "Everything made in silk."},
+		{Handle: "cotton", Title: "Cotton", Tag: "cotton", Description: "Breathable cotton styles."},
+		{Handle: "sarees", Title: "Sarees", Tag: "saree", Description: "Silk, cotton and designer sarees."},
+		{Handle: "kurta-sets", Title: "Kurta Sets", Tag: "kurta-set", Description: "Matching kurta and bottom sets."},
+		{Handle: "footwear", Title: "Footwear", Tag: "footwear", Description: "Juttis, heels, mules and sandals."},
+		{Handle: "accessories", Title: "Accessories", Tag: "accessories", Description: "Jewelry, dupattas and bags."},
+	}
 }

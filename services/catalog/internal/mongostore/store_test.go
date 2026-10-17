@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/pavangolla/retail-learn/services/catalog/internal/catalog"
+	"github.com/pavangolla/retail-learn/services/catalog/internal/catalog/repotest"
 	"github.com/pavangolla/retail-learn/services/catalog/internal/seed"
 )
 
@@ -86,7 +87,15 @@ func TestStoreRoundTrip(t *testing.T) {
 	}
 }
 
-func TestStoreListPagination(t *testing.T) {
+// TestRepositoryContract runs the same behaviour suite the in-memory repository
+// passes, against real MongoDB (in a throwaway database).
+func TestRepositoryContract(t *testing.T) {
+	repotest.Run(t, func(t *testing.T) repotest.Store { return newTestStore(t) })
+}
+
+// TestSeedThroughService loads the real seed data and pages through it with the
+// Service, the way the HTTP layer does.
+func TestSeedThroughService(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 	for _, p := range seed.Products() {
@@ -94,11 +103,16 @@ func TestStoreListPagination(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	for _, c := range seed.Collections() {
+		if err := s.UpsertCollection(ctx, c); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	svc := catalog.NewService(s)
-	total, after := 0, ""
+	total, cursor := 0, ""
 	for pages := 0; pages < 20; pages++ {
-		page, err := svc.List(ctx, 20, after)
+		page, err := svc.List(ctx, catalog.ListQuery{Limit: 20, Cursor: cursor})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -106,9 +120,8 @@ func TestStoreListPagination(t *testing.T) {
 		if page.NextCursor == "" {
 			break
 		}
-		after = page.NextCursor
+		cursor = page.NextCursor
 	}
-
 	active := 0
 	for _, p := range seed.Products() {
 		if p.Status == catalog.StatusActive {
@@ -117,6 +130,17 @@ func TestStoreListPagination(t *testing.T) {
 	}
 	if total != active {
 		t.Fatalf("paged through %d products, want %d active", total, active)
+	}
+
+	// Every seeded collection should have products in it.
+	for _, c := range seed.Collections() {
+		page, err := svc.ListInCollection(ctx, c.Handle, catalog.ListQuery{Limit: 1})
+		if err != nil {
+			t.Fatalf("collection %s: %v", c.Handle, err)
+		}
+		if len(page.Items) == 0 {
+			t.Errorf("collection %s is empty", c.Handle)
+		}
 	}
 }
 

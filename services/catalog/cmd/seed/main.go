@@ -1,5 +1,5 @@
 // Command seed loads the sample catalog into MongoDB. It is safe to run
-// repeatedly: products are upserted by handle.
+// repeatedly: products and collections are upserted by handle.
 //
 //	go run ./cmd/seed
 package main
@@ -52,5 +52,16 @@ func run() error {
 	}
 	log.Printf("seeded %d products (%d active, %d draft) into %q",
 		len(products), active, len(products)-active, cfg.MongoDB)
+
+	collections := seed.Collections()
+	for _, c := range collections {
+		if err := c.Validate(); err != nil {
+			return err
+		}
+		if err := store.UpsertCollection(ctx, c); err != nil {
+			return err
+		}
+	}
+	log.Printf("seeded %d collections", len(collections))
 	return nil
 }

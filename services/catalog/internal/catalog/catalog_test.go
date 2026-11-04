@@ -74,6 +74,36 @@ func TestValidateReportsAllProblems(t *testing.T) {
 	}
 }
 
+func TestCollectionValidate(t *testing.T) {
+	good := Collection{Handle: "silk-edit", Title: "Silk Edit", Tag: "silk"}
+	if err := good.Validate(); err != nil {
+		t.Fatalf("valid collection rejected: %v", err)
+	}
+	bad := Collection{Handle: "Silk Edit", Title: "", Tag: "Silk!"}
+	err := bad.Validate()
+	for _, want := range []string{"handle", "title", "tag"} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("want a %q problem reported, got %v", want, err)
+		}
+	}
+}
+
+func TestComputeDerived(t *testing.T) {
+	p := validProduct()
+	p.Variants[0].PriceCents = 5000
+	p.Variants[1].PriceCents = 3999
+	p.ComputeDerived()
+	if p.PriceFromCents != 3999 {
+		t.Errorf("PriceFromCents = %d, want the cheapest variant 3999", p.PriceFromCents)
+	}
+
+	p.Variants = nil
+	p.ComputeDerived()
+	if p.PriceFromCents != 0 {
+		t.Errorf("no variants: PriceFromCents = %d, want 0", p.PriceFromCents)
+	}
+}
+
 func TestSummaryUsesCheapestVariant(t *testing.T) {
 	p := validProduct()
 	p.Variants[0].PriceCents = 5000
@@ -93,90 +123,144 @@ func TestSummaryUsesCheapestVariant(t *testing.T) {
 	}
 }
 
-// fixture makes n active products with sortable handles p01, p02, ...
+func TestParseSort(t *testing.T) {
+	for in, want := range map[string]Sort{
+		"": SortDefault, "price_asc": SortPriceAsc, "price_desc": SortPriceDesc, "newest": SortNewest,
+	} {
+		got, err := ParseSort(in)
+		if err != nil || got != want {
+			t.Errorf("ParseSort(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+	for _, in := range []string{"cheapest", "PRICE_ASC", "title"} {
+		var ie *InvalidError
+		if _, err := ParseSort(in); !errors.As(err, &ie) {
+			t.Errorf("ParseSort(%q) error = %v, want *InvalidError", in, err)
+		}
+	}
+}
+
+func TestCursorRoundTrip(t *testing.T) {
+	pos := Position{Key: 3999, Handle: "f-jutti"}
+	token := encodeCursor(SortPriceAsc, pos)
+	if strings.ContainsAny(token, "+/=") {
+		t.Errorf("token %q is not URL-safe", token)
+	}
+
+	got, err := decodeCursor(token, SortPriceAsc)
+	if err != nil || got == nil || *got != pos {
+		t.Fatalf("decode = %+v, %v; want %+v", got, err, pos)
+	}
+	if none, err := decodeCursor("", SortNewest); none != nil || err != nil {
+		t.Errorf("empty cursor = %v, %v; want nil, nil", none, err)
+	}
+
+	for name, bad := range map[string]string{
+		"not base64": "%%%", "not json": "bm90IGpzb24", "bad handle": encodeCursor(SortPriceAsc, Position{Handle: "Bad Handle"}),
+	} {
+		var ie *InvalidError
+		if _, err := decodeCursor(bad, SortPriceAsc); !errors.As(err, &ie) {
+			t.Errorf("%s: error = %v, want *InvalidError", name, err)
+		}
+	}
+	var ie *InvalidError
+	if _, err := decodeCursor(token, SortNewest); !errors.As(err, &ie) || !strings.Contains(err.Error(), "different sort") {
+		t.Errorf("cursor reused under another sort: error = %v", err)
+	}
+}
+
+// fixture makes n active products with sortable handles p001, p002, ...
 func fixture(n int) *MemoryRepo {
 	r := NewMemoryRepo()
 	for i := 1; i <= n; i++ {
 		p := validProduct()
-		p.Handle = fmt.Sprintf("p%02d", i)
-		r.Upsert(p)
+		p.Handle = fmt.Sprintf("p%03d", i)
+		p.Title = fmt.Sprintf("Product %d", i)
+		p.Tags = []string{"silk"}
+		_ = r.Upsert(context.Background(), p)
 	}
 	return r
 }
 
-func TestServiceListPagination(t *testing.T) {
-	svc := NewService(fixture(7))
+func TestListRejectsBadRequests(t *testing.T) {
+	svc := NewService(fixture(3))
 	ctx := context.Background()
-
-	var seen []string
-	after := ""
-	pages := 0
-	for {
-		page, err := svc.List(ctx, 3, after)
-		if err != nil {
-			t.Fatal(err)
-		}
-		pages++
-		for _, it := range page.Items {
-			seen = append(seen, it.Handle)
-		}
-		if page.NextCursor == "" {
-			break
-		}
-		after = page.NextCursor
-		if pages > 10 {
-			t.Fatal("pagination did not terminate")
-		}
+	good, err := svc.List(ctx, ListQuery{Limit: 1, Sort: SortPriceAsc})
+	if err != nil || good.NextCursor == "" {
+		t.Fatalf("setup: %+v, %v", good, err)
 	}
 
-	if pages != 3 {
-		t.Errorf("pages = %d, want 3 (3+3+1)", pages)
+	tests := []struct {
+		name    string
+		q       ListQuery
+		wantMsg string
+	}{
+		{"min above max", ListQuery{Filter: Filter{MinPriceCents: 500, MaxPriceCents: 100}}, "minPrice"},
+		{"negative price", ListQuery{Filter: Filter{MinPriceCents: -1}}, "negative"},
+		{"too many tags", ListQuery{Filter: Filter{Tags: strings.Fields("a b c d e f g h i j k")}}, "at most"},
+		{"garbage cursor", ListQuery{Cursor: "garbage!"}, "invalid cursor"},
+		{"cursor from another sort", ListQuery{Sort: SortNewest, Cursor: good.NextCursor}, "different sort"},
+		{"search with sort", ListQuery{Search: "silk", Sort: SortPriceAsc}, "cannot be combined"},
+		{"search with cursor", ListQuery{Search: "silk", Cursor: good.NextCursor}, "cannot be combined"},
+		{"search too long", ListQuery{Search: strings.Repeat("x", MaxSearchLen+1)}, "at most"},
 	}
-	want := []string{"p01", "p02", "p03", "p04", "p05", "p06", "p07"}
-	if strings.Join(seen, ",") != strings.Join(want, ",") {
-		t.Errorf("seen = %v, want %v (no gaps, no repeats)", seen, want)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := svc.List(ctx, tc.q)
+			var ie *InvalidError
+			if !errors.As(err, &ie) || !strings.Contains(ie.Msg, tc.wantMsg) {
+				t.Fatalf("error = %v, want *InvalidError containing %q", err, tc.wantMsg)
+			}
+		})
 	}
 }
 
-func TestServiceListExactMultipleHasNoExtraPage(t *testing.T) {
-	svc := NewService(fixture(6))
-	page, err := svc.List(context.Background(), 3, "p03")
+func TestFilterIsNormalized(t *testing.T) {
+	svc := NewService(fixture(4))
+	page, err := svc.List(context.Background(), ListQuery{Filter: Filter{Tags: []string{" SILK ", "silk", "  "}, ProductType: " Kaftan "}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(page.Items) != 3 || page.NextCursor != "" {
-		t.Fatalf("last page = %d items, cursor %q; want 3 items and no cursor", len(page.Items), page.NextCursor)
+	if len(page.Items) != 4 {
+		t.Errorf("messy tags/type should be trimmed, lowercased (tags) and de-duplicated; got %d items", len(page.Items))
 	}
 }
 
-func TestServiceListLimitClamping(t *testing.T) {
+func TestListLimits(t *testing.T) {
 	svc := NewService(fixture(150))
 	ctx := context.Background()
 
-	def, _ := svc.List(ctx, 0, "")
-	if len(def.Items) != DefaultLimit {
-		t.Errorf("default limit gave %d items, want %d", len(def.Items), DefaultLimit)
+	def, _ := svc.List(ctx, ListQuery{})
+	if len(def.Items) != DefaultLimit || def.NextCursor == "" {
+		t.Errorf("default limit gave %d items (cursor %q), want %d with a next page", len(def.Items), def.NextCursor, DefaultLimit)
 	}
-	big, _ := svc.List(ctx, 100000, "")
+	big, _ := svc.List(ctx, ListQuery{Limit: 100000})
 	if len(big.Items) != MaxLimit {
 		t.Errorf("huge limit gave %d items, want clamp to %d", len(big.Items), MaxLimit)
+	}
+	found, err := svc.List(ctx, ListQuery{Search: "product", Limit: 100000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found.Items) != MaxSearchResults || found.NextCursor != "" {
+		t.Errorf("search gave %d items (cursor %q), want %d and no cursor", len(found.Items), found.NextCursor, MaxSearchResults)
 	}
 }
 
 func TestServiceHidesDrafts(t *testing.T) {
 	repo := fixture(2)
 	draft := validProduct()
-	draft.Handle = "p03"
+	draft.Handle = "p003"
 	draft.Status = StatusDraft
-	repo.Upsert(draft)
+	_ = repo.Upsert(context.Background(), draft)
 	svc := NewService(repo)
 	ctx := context.Background()
 
-	page, _ := svc.List(ctx, 10, "")
+	page, _ := svc.List(ctx, ListQuery{Limit: 10})
 	if len(page.Items) != 2 {
 		t.Errorf("list shows %d items, want 2 (draft hidden)", len(page.Items))
 	}
-	if _, err := svc.Get(ctx, "p03"); !errors.Is(err, ErrNotFound) {
+	if _, err := svc.Get(ctx, "p003"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("Get(draft) error = %v, want ErrNotFound", err)
 	}
 }
@@ -185,9 +269,9 @@ func TestServiceGet(t *testing.T) {
 	svc := NewService(fixture(2))
 	ctx := context.Background()
 
-	p, err := svc.Get(ctx, "p02")
-	if err != nil || p.Handle != "p02" || len(p.Variants) != 2 {
-		t.Fatalf("Get(p02) = %+v, %v", p.Handle, err)
+	p, err := svc.Get(ctx, "p002")
+	if err != nil || p.Handle != "p002" || len(p.Variants) != 2 {
+		t.Fatalf("Get(p002) = %+v, %v", p.Handle, err)
 	}
 	for _, h := range []string{"missing", "Not A Handle", ""} {
 		if _, err := svc.Get(ctx, h); !errors.Is(err, ErrNotFound) {

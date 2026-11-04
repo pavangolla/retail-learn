@@ -28,8 +28,15 @@ type Deps struct {
 func New(d Deps) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", healthHandler(d.Mongo))
+	// "/products/facets" is a literal, so it wins over "/products/{handle}".
+	// That makes "facets" a reserved product handle.
 	mux.HandleFunc("GET /products", listProductsHandler(d.Catalog))
+	mux.HandleFunc("GET /products/facets", productFacetsHandler(d.Catalog))
 	mux.HandleFunc("GET /products/{handle}", getProductHandler(d.Catalog))
+	mux.HandleFunc("GET /collections", listCollectionsHandler(d.Catalog))
+	mux.HandleFunc("GET /collections/{handle}", getCollectionHandler(d.Catalog))
+	mux.HandleFunc("GET /collections/{handle}/products", collectionProductsHandler(d.Catalog))
+	mux.HandleFunc("GET /collections/{handle}/facets", collectionFacetsHandler(d.Catalog))
 
 	// Order matters: logging wraps recovery so a panic still gets logged as a 500.
 	return logRequests(recoverPanics(mux))

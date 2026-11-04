@@ -35,8 +35,12 @@ type Product struct {
 	Options     []Option  `json:"options" bson:"options"`
 	Variants    []Variant `json:"variants" bson:"variants"`
 	Images      []Image   `json:"images" bson:"images"`
-	CreatedAt   time.Time `json:"createdAt" bson:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt" bson:"updatedAt"`
+	// PriceFromCents is the lowest variant price. It is derived data, stored on
+	// the document only so MongoDB can filter and sort on it (it cannot index
+	// "the minimum of an embedded array"). Call ComputeDerived before saving.
+	PriceFromCents int64     `json:"-" bson:"priceFromCents"`
+	CreatedAt      time.Time `json:"createdAt" bson:"createdAt"`
+	UpdatedAt      time.Time `json:"updatedAt" bson:"updatedAt"`
 }
 
 // Option is a dimension a shopper chooses, e.g. Color or Size.
@@ -61,6 +65,42 @@ type Variant struct {
 type Image struct {
 	URL string `json:"url" bson:"url"`
 	Alt string `json:"alt" bson:"alt"`
+}
+
+// ComputeDerived refreshes fields calculated from other fields. Every code
+// path that saves a product must call it, or price filters and sorts go stale.
+func (p *Product) ComputeDerived() {
+	p.PriceFromCents = 0
+	for i, v := range p.Variants {
+		if i == 0 || v.PriceCents < p.PriceFromCents {
+			p.PriceFromCents = v.PriceCents
+		}
+	}
+}
+
+// Collection is a named group of products defined by a rule, like a Shopify
+// "smart collection". The rule is simple: a product belongs to the collection
+// when it carries Tag.
+type Collection struct {
+	Handle      string `json:"handle" bson:"handle"`
+	Title       string `json:"title" bson:"title"`
+	Description string `json:"description" bson:"description"`
+	Tag         string `json:"tag" bson:"tag"`
+}
+
+// Validate checks a collection's business rules.
+func (c Collection) Validate() error {
+	var errs []error
+	if !ValidHandle(c.Handle) {
+		errs = append(errs, fmt.Errorf("handle %q must be a lowercase slug (a-z, 0-9, hyphens)", c.Handle))
+	}
+	if c.Title == "" {
+		errs = append(errs, errors.New("title is required"))
+	}
+	if !ValidHandle(c.Tag) {
+		errs = append(errs, fmt.Errorf("tag %q must be a lowercase slug", c.Tag))
+	}
+	return errors.Join(errs...)
 }
 
 // Summary is the small shape used in product lists and cards. A list page

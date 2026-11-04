@@ -83,3 +83,41 @@ func TestSlug(t *testing.T) {
 		}
 	}
 }
+
+func TestCollectionsAreValidAndUnique(t *testing.T) {
+	seen := map[string]bool{}
+	for _, c := range Collections() {
+		if err := c.Validate(); err != nil {
+			t.Errorf("%s: %v", c.Handle, err)
+		}
+		if seen[c.Handle] {
+			t.Errorf("duplicate collection handle %q", c.Handle)
+		}
+		seen[c.Handle] = true
+	}
+}
+
+// A collection is a tag rule, so a collection nobody's tagged for would be an
+// empty page in the storefront.
+func TestEveryCollectionHasActiveProducts(t *testing.T) {
+	count := map[string]int{}
+	for _, p := range Products() {
+		if p.Status != catalog.StatusActive {
+			continue
+		}
+		for _, tag := range p.Tags {
+			count[tag]++
+		}
+	}
+	for _, c := range Collections() {
+		if count[c.Tag] == 0 {
+			t.Errorf("collection %q (tag %q) has no active products", c.Handle, c.Tag)
+		}
+	}
+}
+
+func TestCollectionsAreDeterministic(t *testing.T) {
+	if !reflect.DeepEqual(Collections(), Collections()) {
+		t.Fatal("Collections() must be identical on every call")
+	}
+}

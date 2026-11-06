@@ -16,6 +16,10 @@ Retail-Learn/
 ├── CLAUDE.md
 ├── docker-compose.yml
 ├── web/                 Next.js storefront
+│   └── src/
+│       ├── app/         pages: / , /collections/[handle], /products/[handle], /search
+│       ├── components/  Header, ProductCard/Grid
+│       └── lib/         catalog.ts (server-side API client), url.ts (query-string helpers), format.ts (money)
 └── services/
     └── catalog/         first Go service (products, variants, collections)
         ├── main.go              wiring and graceful shutdown
@@ -58,6 +62,8 @@ Future services (cart, order, inventory, account, notification) go in `services/
 - Search returns the top 50 by relevance, no paging. Mongo uses a weighted text index (title 10, productType 5, tags 5, description 1) with stemming; `MemoryRepo` approximates it with whole-word matching and the same weights, so tests share one contract (`repotest`) but not identical ranking details.
 - `facets` is a reserved product handle (`/products/facets` is a literal route).
 - Every `Repository` implementation must pass `repotest.Run`.
+- Storefront state lives in the URL: filters, sort and paging are plain links (`?type=&min=&max=&sort=&after=`), so pages are shareable and need no client JavaScript. The only client component is the product `VariantPicker`.
+- In Next 16, `params` and `searchParams` are Promises and reading them is dynamic: pages are a sync shell that renders an inner async component inside `<Suspense>`.
 - Product image URLs are paths served by the storefront (`/placeholders/<name>.svg` from `web/public/placeholders/`), not catalog-hosted files.
 - Storefront-facing repository methods only ever return `active` products; drafts are invisible (404).
 - Money is stored as integer cents plus a currency code, never floats.
@@ -83,8 +89,8 @@ Future services (cart, order, inventory, account, notification) go in `services/
 - [x] Phase 0: foundations (repo, compose, scaffold web and catalog, web calls `/health`)
 - [ ] Phase 1: catalog and storefront
   - [x] 1a: data model, Mongo store, seed data, `/products` and `/products/{handle}` (Mongo integration tests and seed run verified locally)
-  - [x] 1b: tag-based collections, filters (type, tag, price), sort, text search, facets (built; pending local Mongo test run)
-  - [ ] 1c: storefront pages (collection, product with variant selector, search) and placeholder SVGs
+  - [x] 1b: tag-based collections, filters (type, tag, price), sort, text search, facets (Mongo tests and seed run verified locally)
+  - [x] 1c: storefront pages (home, collection with filters/sort/paging, product with variant selector, search) and placeholder SVGs (written in cloud; `npm run lint && npm run build` pending locally)
 - [ ] Phase 2: cart (Redis) and accounts (auth, profile, addresses)
 - [ ] Phase 3: checkout, Stripe test payments, orders
 - [ ] Phase 4: inventory reservation and Kafka events, transactional emails
@@ -100,3 +106,4 @@ Future services (cart, order, inventory, account, notification) go in `services/
 - 2026-10-10: Cloud sessions cannot compile the Mongo driver, so the Mongo layer is isolated in `internal/mongostore`; everything else is tested against `catalog.MemoryRepo`. Cloud-side type-checking of driver code uses a throwaway API stub and does not replace running the integration tests locally.
 - 2026-10-10: Next.js 16 scaffold enables `cacheComponents`. Do not use `export const dynamic`; wrap components that fetch live data (calls to Go services) in `<Suspense>`, and only use `"use cache"` where caching is intended.
 - 2026-10-16: Phase 1b added filters, sorts, text search, facets and tag-rule collections. Cursor pagination now covers every sort. Mongo query building lives in `mongostore/queries.go` as pure functions with unit tests that need no database. Cloud checks use a driver stub, so the real driver is only exercised by `MONGO_URI=... go test ./internal/mongostore/` locally.
+- 2026-11-03: Phase 1c storefront written without `node_modules` (npm registry blocked in cloud), so it is only checked for SVG validity, strict TypeScript on `src/lib`, and unit-level helper logic. Pages and components are verified by running `npm run lint && npm run build` locally.

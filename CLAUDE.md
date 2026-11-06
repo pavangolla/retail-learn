@@ -87,10 +87,10 @@ Future services (cart, order, inventory, account, notification) go in `services/
 
 ## Roadmap
 - [x] Phase 0: foundations (repo, compose, scaffold web and catalog, web calls `/health`)
-- [ ] Phase 1: catalog and storefront
+- [x] Phase 1: catalog and storefront
   - [x] 1a: data model, Mongo store, seed data, `/products` and `/products/{handle}` (Mongo integration tests and seed run verified locally)
   - [x] 1b: tag-based collections, filters (type, tag, price), sort, text search, facets (Mongo tests and seed run verified locally)
-  - [x] 1c: storefront pages (home, collection with filters/sort/paging, product with variant selector, search) and placeholder SVGs (written in cloud; `npm run lint && npm run build` pending locally)
+  - [x] 1c: storefront pages (home, collection with filters/sort/paging, product with variant selector, search) and placeholder SVGs (lint, build and click-through verified locally)
 - [ ] Phase 2: cart (Redis) and accounts (auth, profile, addresses)
 - [ ] Phase 3: checkout, Stripe test payments, orders
 - [ ] Phase 4: inventory reservation and Kafka events, transactional emails
@@ -106,4 +106,4 @@ Future services (cart, order, inventory, account, notification) go in `services/
 - 2026-10-10: Cloud sessions cannot compile the Mongo driver, so the Mongo layer is isolated in `internal/mongostore`; everything else is tested against `catalog.MemoryRepo`. Cloud-side type-checking of driver code uses a throwaway API stub and does not replace running the integration tests locally.
 - 2026-10-10: Next.js 16 scaffold enables `cacheComponents`. Do not use `export const dynamic`; wrap components that fetch live data (calls to Go services) in `<Suspense>`, and only use `"use cache"` where caching is intended.
 - 2026-10-16: Phase 1b added filters, sorts, text search, facets and tag-rule collections. Cursor pagination now covers every sort. Mongo query building lives in `mongostore/queries.go` as pure functions with unit tests that need no database. Cloud checks use a driver stub, so the real driver is only exercised by `MONGO_URI=... go test ./internal/mongostore/` locally.
-- 2026-11-03: Phase 1c storefront written without `node_modules` (npm registry blocked in cloud), so it is only checked for SVG validity, strict TypeScript on `src/lib`, and unit-level helper logic. Pages and components are verified by running `npm run lint && npm run build` locally.
+- 2026-11-03: Phase 1c storefront was written without `node_modules` (npm registry blocked in cloud), so cloud checks covered only SVG validity, strict TypeScript on `src/lib`, and helper logic. Pages and components were verified locally with `npm run lint && npm run build` and by running the app (2026-11-05). Phase 1 complete.

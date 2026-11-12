@@ -120,3 +120,24 @@ func facetPipeline(f catalog.Filter) bson.A {
 		}}},
 	}
 }
+
+// variantsFilter finds active products that contain any of the given SKUs.
+// "variants.sku" reaches into the embedded variants array; Mongo matches when
+// any element's sku is in the list, and a multikey index on that field serves it.
+func variantsFilter(skus []string) bson.D {
+	return bson.D{
+		{Key: "status", Value: catalog.StatusActive},
+		{Key: "variants.sku", Value: bson.D{{Key: "$in", Value: skus}}},
+	}
+}
+
+// variantsProjection fetches only the fields a VariantInfo needs, not the
+// description, tags and other data the cart never uses.
+func variantsProjection() bson.D {
+	return bson.D{
+		{Key: "handle", Value: 1},
+		{Key: "title", Value: 1},
+		{Key: "images", Value: 1},
+		{Key: "variants", Value: 1},
+	}
+}

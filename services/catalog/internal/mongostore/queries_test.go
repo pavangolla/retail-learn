@@ -121,3 +121,13 @@ func TestFacetPipelineShape(t *testing.T) {
 		t.Errorf("facet branches = %v", keys)
 	}
 }
+
+func TestVariantsFilter(t *testing.T) {
+	want := bson.D{
+		{Key: "status", Value: "active"},
+		{Key: "variants.sku", Value: bson.D{{Key: "$in", Value: []string{"A-1", "B-2"}}}},
+	}
+	if got := variantsFilter([]string{"A-1", "B-2"}); !reflect.DeepEqual(got, want) {
+		t.Errorf("got %#v\nwant %#v", got, want)
+	}
+}

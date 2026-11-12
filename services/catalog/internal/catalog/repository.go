@@ -28,6 +28,10 @@ type Repository interface {
 	// Facets summarizes the active products that match the filter.
 	Facets(ctx context.Context, f Filter) (Facets, error)
 
+	// FindVariants returns the variants with the given SKUs that belong to
+	// active products, in any order. Unknown SKUs are omitted, not an error.
+	FindVariants(ctx context.Context, skus []string) ([]VariantInfo, error)
+
 	// ListCollections returns every collection ordered by handle.
 	ListCollections(ctx context.Context) ([]Collection, error)
 	// GetCollection returns one collection, or ErrNotFound.

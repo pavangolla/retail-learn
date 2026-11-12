@@ -86,6 +86,8 @@ func (s *Store) EnsureIndexes(ctx context.Context) error {
 		// Filter by product type, and by tag (a multikey index: one entry per tag).
 		idx("type_status_handle", bson.D{{Key: "productType", Value: 1}, {Key: "status", Value: 1}, {Key: "handle", Value: 1}}),
 		idx("tags_status_handle", bson.D{{Key: "tags", Value: 1}, {Key: "status", Value: 1}, {Key: "handle", Value: 1}}),
+		// Look up variants by SKU (the cart does this): multikey on the embedded array.
+		idx("variants_sku", bson.D{{Key: "variants.sku", Value: 1}}),
 		{
 			// Full-text search. A collection may have only one text index. Weights
 			// make a title match count 10x a description match.
@@ -157,6 +159,29 @@ func (s *Store) Search(ctx context.Context, params catalog.SearchParams) ([]cata
 		opts.SetLimit(int64(params.Limit))
 	}
 	return s.find(ctx, filter, opts)
+}
+
+// FindVariants returns the variants with the given SKUs from active products.
+// One query finds the products that hold them; the matching variants are then
+// picked out in Go, because a product document carries all of its variants.
+func (s *Store) FindVariants(ctx context.Context, skus []string) ([]catalog.VariantInfo, error) {
+	products, err := s.find(ctx, variantsFilter(skus), options.Find().SetProjection(variantsProjection()))
+	if err != nil {
+		return nil, err
+	}
+	want := make(map[string]bool, len(skus))
+	for _, sku := range skus {
+		want[sku] = true
+	}
+	var out []catalog.VariantInfo
+	for _, p := range products {
+		for _, v := range p.Variants {
+			if want[v.SKU] {
+				out = append(out, catalog.NewVariantInfo(p, v))
+			}
+		}
+	}
+	return out, nil
 }
 
 // Facets counts product types and tags and finds the price range for the

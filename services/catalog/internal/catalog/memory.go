@@ -261,3 +261,25 @@ func (r *MemoryRepo) GetCollection(_ context.Context, handle string) (Collection
 	}
 	return c, nil
 }
+
+// FindVariants returns the variants with the given SKUs from active products.
+func (r *MemoryRepo) FindVariants(_ context.Context, skus []string) ([]VariantInfo, error) {
+	want := make(map[string]bool, len(skus))
+	for _, s := range skus {
+		want[s] = true
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var out []VariantInfo
+	for _, p := range r.products {
+		if p.Status != StatusActive {
+			continue
+		}
+		for _, v := range p.Variants {
+			if want[v.SKU] {
+				out = append(out, NewVariantInfo(p, v))
+			}
+		}
+	}
+	return out, nil
+}

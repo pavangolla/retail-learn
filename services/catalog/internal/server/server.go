@@ -33,6 +33,7 @@ func New(d Deps) http.Handler {
 	mux.HandleFunc("GET /products", listProductsHandler(d.Catalog))
 	mux.HandleFunc("GET /products/facets", productFacetsHandler(d.Catalog))
 	mux.HandleFunc("GET /products/{handle}", getProductHandler(d.Catalog))
+	mux.HandleFunc("GET /variants", variantsHandler(d.Catalog))
 	mux.HandleFunc("GET /collections", listCollectionsHandler(d.Catalog))
 	mux.HandleFunc("GET /collections/{handle}", getCollectionHandler(d.Catalog))
 	mux.HandleFunc("GET /collections/{handle}/products", collectionProductsHandler(d.Catalog))

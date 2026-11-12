@@ -125,6 +125,7 @@ func Run(t *testing.T, newStore func(t *testing.T) Store) {
 	t.Run("facets", func(t *testing.T) { testFacets(t, svc) })
 	t.Run("collections", func(t *testing.T) { testCollections(t, svc) })
 	t.Run("get", func(t *testing.T) { testGet(t, svc) })
+	t.Run("variants", func(t *testing.T) { testVariants(t, svc) })
 }
 
 func handles(p catalog.Page) []string {
@@ -410,6 +411,50 @@ func testGet(t *testing.T, svc *catalog.Service) {
 	for _, h := range []string{"z-draft", "missing"} {
 		if _, err := svc.Get(ctx, h); !errors.Is(err, catalog.ErrNotFound) {
 			t.Errorf("Get(%q) error = %v, want ErrNotFound", h, err)
+		}
+	}
+}
+
+func testVariants(t *testing.T, svc *catalog.Service) {
+	ctx := context.Background()
+
+	// f-jutti-2 is the second variant of a two-variant product. The request lists
+	// an unknown SKU, a draft's SKU and a duplicate; results follow request order.
+	got, err := svc.Variants(ctx, []string{"f-jutti-2", "missing-1", "z-draft-1", "a-silk-saree-1", "f-jutti-2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var skus []string
+	for _, v := range got {
+		skus = append(skus, v.SKU)
+	}
+	if want := []string{"f-jutti-2", "a-silk-saree-1"}; !slices.Equal(skus, want) {
+		t.Fatalf("skus = %v, want %v (unknown and draft omitted, request order kept)", skus, want)
+	}
+	j := got[0]
+	if j.ProductHandle != "f-jutti" || j.ProductTitle != "Embroidered Jutti" || j.Title != "V2" ||
+		j.PriceCents != 5999 || j.Currency != "USD" || j.Image == nil || j.Image.URL != "/placeholders/x.svg" {
+		t.Errorf("variant info = %+v", j)
+	}
+
+	none, err := svc.Variants(ctx, []string{"nope"})
+	if err != nil || len(none) != 0 {
+		t.Errorf("unknown sku: got %v, err %v; want empty and no error", none, err)
+	}
+
+	var invalid *catalog.InvalidError
+	bad := map[string][]string{
+		"empty list": {},
+		"bad chars":  {"a b"},
+		"blank":      {" "},
+		"too many":   make([]string, catalog.MaxVariantLookup+1),
+	}
+	for i := range bad["too many"] {
+		bad["too many"][i] = fmt.Sprintf("sku-%d", i)
+	}
+	for name, in := range bad {
+		if _, err := svc.Variants(ctx, in); !errors.As(err, &invalid) {
+			t.Errorf("%s: error = %v, want InvalidError", name, err)
 		}
 	}
 }

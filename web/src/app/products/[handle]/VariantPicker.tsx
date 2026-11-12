@@ -1,6 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import Link from "next/link";
+import { useState, useTransition } from "react";
+import { addToCart } from "@/app/cart/actions";
 import type { Option, Variant } from "@/lib/catalog";
 import { formatMoney } from "@/lib/format";
 
@@ -25,6 +27,27 @@ export function VariantPicker({
   const onSale =
     variant?.compareAtCents !== undefined &&
     variant.compareAtCents > variant.priceCents;
+
+  // useTransition marks the server call as "pending" without freezing the page,
+  // which lets us disable the button while the request is in flight.
+  const [pending, startTransition] = useTransition();
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+
+  function onAdd() {
+    if (!variant) return;
+    // One key per click: if this request is retried on the way, the cart service
+    // sees the same key and does not add the item twice.
+    const key = crypto.randomUUID();
+    setMessage(null);
+    startTransition(async () => {
+      const res = await addToCart(variant.sku, 1, key);
+      setMessage(
+        res.ok
+          ? { ok: true, text: `Added. Your cart has ${res.itemCount} item${res.itemCount === 1 ? "" : "s"}.` }
+          : { ok: false, text: res.error },
+      );
+    });
+  }
 
   return (
     <div className="mt-4">
@@ -70,14 +93,29 @@ export function VariantPicker({
 
       {variant && <p className="mt-4 text-xs text-neutral-500">SKU {variant.sku}</p>}
 
-      {/* Cart arrives in Phase 2. */}
       <button
         type="button"
-        disabled
-        className="mt-6 w-full rounded bg-neutral-900 px-4 py-3 text-white opacity-40"
+        onClick={onAdd}
+        disabled={!variant || pending}
+        className="mt-6 w-full rounded bg-neutral-900 px-4 py-3 text-white disabled:opacity-40"
       >
-        Add to cart (coming in Phase 2)
+        {pending ? "Adding..." : "Add to cart"}
       </button>
+
+      <p
+        role="status"
+        className={`mt-3 text-sm ${message && !message.ok ? "text-red-700" : "text-green-700"}`}
+      >
+        {message?.text}
+        {message?.ok && (
+          <>
+            {" "}
+            <Link href="/cart" className="underline">
+              View cart
+            </Link>
+          </>
+        )}
+      </p>
     </div>
   );
 }

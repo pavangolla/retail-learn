@@ -336,3 +336,26 @@ func TestRecoverPanics(t *testing.T) {
 		t.Errorf("body = %q", rec.Body)
 	}
 }
+
+func TestVariantsOverHTTP(t *testing.T) {
+	h := newTestServer(nil)
+
+	var res struct {
+		Items []catalog.VariantInfo `json:"items"`
+	}
+	get(t, h, "/variants?sku=f-jutti-2&sku=missing&sku=z-draft-1&sku=a-silk-saree-1", http.StatusOK, &res)
+	if len(res.Items) != 2 || res.Items[0].SKU != "f-jutti-2" || res.Items[0].PriceCents != 5999 ||
+		res.Items[1].SKU != "a-silk-saree-1" {
+		t.Fatalf("items = %+v", res.Items)
+	}
+
+	// Nothing known: still 200 with an empty list, never null.
+	rec := get(t, h, "/variants?sku=nope", http.StatusOK, nil)
+	if !strings.Contains(rec.Body.String(), `"items":[]`) {
+		t.Errorf("empty result should be an empty array, got %s", rec.Body)
+	}
+
+	for _, target := range []string{"/variants", "/variants?sku=a%20b", "/variants?sku="} {
+		get(t, h, target, http.StatusBadRequest, nil)
+	}
+}

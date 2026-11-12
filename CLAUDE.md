@@ -17,10 +17,19 @@ Retail-Learn/
 ├── docker-compose.yml
 ├── web/                 Next.js storefront
 │   └── src/
-│       ├── app/         pages: / , /collections/[handle], /products/[handle], /search
-│       ├── components/  Header, ProductCard/Grid
-│       └── lib/         catalog.ts (server-side API client), url.ts (query-string helpers), format.ts (money)
+│       ├── app/         pages: / , /collections/[handle], /products/[handle], /search, /cart (+ cart/actions.ts Server Actions)
+│       ├── components/  Header, CartLink, ProductCard/Grid
+│       └── lib/         catalog.ts and cart.ts (server-side API clients), url.ts (query-string helpers), format.ts (money)
 └── services/
+    ├── cart/            Redis-backed cart service (port 8082)
+    │   ├── main.go
+    │   └── internal/
+    │       ├── cart/            domain: limits, Service, Store interface, in-memory store
+    │       │   └── carttest/    shared contract tests every Store must pass
+    │       ├── redisstore/      Redis implementation (the only package importing go-redis); apply.lua does each change atomically
+    │       ├── catalogclient/   HTTP client for the catalog's GET /variants
+    │       ├── server/          HTTP routes, handlers, middleware
+    │       └── config/          environment-based settings
     └── catalog/         first Go service (products, variants, collections)
         ├── main.go              wiring and graceful shutdown
         ├── cmd/seed/            loads the sample catalog into MongoDB
@@ -39,6 +48,7 @@ Future services (cart, order, inventory, account, notification) go in `services/
 - Stop infra: `docker compose down` (add `-v` to wipe data)
 - First-time web setup: `cd web && npm install` (needs internet). Create `web/.env.local` with `CATALOG_URL=http://localhost:8081`
 - Frontend: `cd web && npm run dev` (http://localhost:3000)
+- Cart service: `cd services/cart && go run .` (http://localhost:8082, env: `PORT`, `REDIS_URL`, `CATALOG_URL`; needs Redis up and the catalog running). Exits at startup if Redis is unreachable.
 - Catalog service: `cd services/catalog && go run .` (http://localhost:8081, env: `PORT`, `MONGO_URI`, `MONGO_DB`; see `.env.example`). Exits at startup if MongoDB is unreachable.
 - Seed the catalog: `cd services/catalog && go run ./cmd/seed` (idempotent; upserts products and collections by handle; re-run after pulling 1b to backfill `priceFromCents`)
 - Catalog API:
@@ -46,9 +56,16 @@ Future services (cart, order, inventory, account, notification) go in `services/
   - `GET /products?limit=&after=<cursor>&sort=price_asc|price_desc|newest&type=&tag=&minPrice=&maxPrice=&q=` (`tag` repeatable, AND; prices in cents; `q` = text search)
   - `GET /products/facets` (same filters), `GET /products/{handle}`
   - `GET /collections`, `GET /collections/{handle}`, `GET /collections/{handle}/products` (same params as `/products`), `GET /collections/{handle}/facets`
-- First-time Go deps (needs internet): `cd services/catalog && go get go.mongodb.org/mongo-driver/v2 && go mod tidy`
-- Go tests: `cd services/catalog && go test ./...`
+  - `GET /variants?sku=A&sku=B` (price/title/image per SKU for other services; unknown and draft SKUs are omitted; max 50)
+- Cart API (service on :8082):
+  - `POST /carts` -> `{id}` (nothing is stored until the first item); `GET /carts/{id}` (priced from the catalog); `DELETE /carts/{id}`
+  - `POST /carts/{id}/items` `{sku, quantity}` with required `Idempotency-Key` header (retry replies carry `Idempotent-Replayed: true`)
+  - `PUT /carts/{id}/items/{sku}` `{quantity}` (0 removes), `DELETE /carts/{id}/items/{sku}`
+  - Limits: quantity 1-10 per line, 50 lines, 30-day expiry renewed on change. 400 invalid, 409 limit reached, 503 catalog down.
+- First-time Go deps (needs internet): `cd services/catalog && go get go.mongodb.org/mongo-driver/v2 && go mod tidy`; and for the cart: `cd services/cart && go get github.com/redis/go-redis/v9 && go mod tidy`
+- Go tests: `cd services/catalog && go test ./...` and `cd services/cart && go test ./...`
 - Mongo integration tests: `cd services/catalog && MONGO_URI=mongodb://localhost:27017 go test ./internal/mongostore/` (skipped when `MONGO_URI` is unset)
+- Redis integration tests: `cd services/cart && REDIS_URL=redis://localhost:6379 go test ./internal/redisstore/` (skipped when `REDIS_URL` is unset)
 - Frontend checks: `cd web && npm run lint && npm run build`
 
 ## Architecture decisions
@@ -61,7 +78,12 @@ Future services (cart, order, inventory, account, notification) go in `services/
 - `priceFromCents` (cheapest variant) is a derived field stored on the product document so Mongo can filter, sort and index on it. `ComputeDerived()` must run before every save (both repositories' `Upsert` do it).
 - Search returns the top 50 by relevance, no paging. Mongo uses a weighted text index (title 10, productType 5, tags 5, description 1) with stemming; `MemoryRepo` approximates it with whole-word matching and the same weights, so tests share one contract (`repotest`) but not identical ranking details.
 - `facets` is a reserved product handle (`/products/facets` is a literal route).
-- Every `Repository` implementation must pass `repotest.Run`.
+- Every `Repository` implementation must pass `repotest.Run`; every cart `Store` must pass `carttest.Run`.
+- Services talk to each other only over HTTP APIs, never through each other's data. The cart asks the catalog's `GET /variants` for prices; it stores only SKU and quantity, so a price can never be stale or client-supplied. A delisted SKU stays in the cart as an unavailable line (removable, not charged).
+- Cart storage is one Redis hash per cart (`cart:{id}`, field = SKU, value = quantity) with a 30-day sliding expiry. Every change runs through one Lua script (`redisstore/apply.lua`) so limits and the idempotency marker are enforced atomically. The `{id}` hash tag keeps a cart and its markers on one node in a Redis Cluster.
+- Idempotency: `POST .../items` requires an `Idempotency-Key`; the marker (`idem:{id}:<key>`, 24h) is written in the same script only after success, so a retry never double-adds and a rejected add can be retried. `PUT` is idempotent by nature.
+- A cart id (128 random bits) is the cart's only credential: it lives in an httpOnly, SameSite=Lax cookie set by the Next.js server, is shape-checked everywhere, and is never logged (the cart service logs the route pattern, not the URL).
+- Next.js Server Actions (`web/src/app/cart/actions.ts`) are public POST endpoints: they re-validate their arguments and the cart service validates again. Cookies can only be written there (or in route handlers), not during render.
 - Storefront state lives in the URL: filters, sort and paging are plain links (`?type=&min=&max=&sort=&after=`), so pages are shareable and need no client JavaScript. The only client component is the product `VariantPicker`.
 - In Next 16, `params` and `searchParams` are Promises and reading them is dynamic: pages are a sync shell that renders an inner async component inside `<Suspense>`.
 - Product image URLs are paths served by the storefront (`/placeholders/<name>.svg` from `web/public/placeholders/`), not catalog-hosted files.
@@ -92,6 +114,9 @@ Future services (cart, order, inventory, account, notification) go in `services/
   - [x] 1b: tag-based collections, filters (type, tag, price), sort, text search, facets (Mongo tests and seed run verified locally)
   - [x] 1c: storefront pages (home, collection with filters/sort/paging, product with variant selector, search) and placeholder SVGs (lint, build and click-through verified locally)
 - [ ] Phase 2: cart (Redis) and accounts (auth, profile, addresses)
+  - [x] 2a: cart service (Redis), catalog `GET /variants`, storefront cart (add to cart, header count, /cart page) (built in cloud; local Redis tests and click-through pending)
+  - [ ] 2b: account service (register, login, Redis sessions, profile, addresses) and its pages
+  - [ ] 2c: join them (merge the guest cart into the user's cart on login)
 - [ ] Phase 3: checkout, Stripe test payments, orders
 - [ ] Phase 4: inventory reservation and Kafka events, transactional emails
 - [ ] Phase 5: split into separate services, gateway, idempotency and retries
@@ -107,3 +132,4 @@ Future services (cart, order, inventory, account, notification) go in `services/
 - 2026-10-10: Next.js 16 scaffold enables `cacheComponents`. Do not use `export const dynamic`; wrap components that fetch live data (calls to Go services) in `<Suspense>`, and only use `"use cache"` where caching is intended.
 - 2026-10-16: Phase 1b added filters, sorts, text search, facets and tag-rule collections. Cursor pagination now covers every sort. Mongo query building lives in `mongostore/queries.go` as pure functions with unit tests that need no database. Cloud checks use a driver stub, so the real driver is only exercised by `MONGO_URI=... go test ./internal/mongostore/` locally.
 - 2026-11-03: Phase 1c storefront was written without `node_modules` (npm registry blocked in cloud), so cloud checks covered only SVG validity, strict TypeScript on `src/lib`, and helper logic. Pages and components were verified locally with `npm run lint && npm run build` and by running the app (2026-11-05). Phase 1 complete.
+- 2026-11-11: Phase 2a added `services/cart` (own go.mod, Redis via go-redis v9) and the catalog's `GET /variants`. The Lua script was verified against a real redis-server in the cloud sandbox; the Go glue was type-checked against a stub, so `REDIS_URL=... go test ./internal/redisstore/` locally is the real check. Web code is checked only for strict types and the cart client's retry logic (mocked fetch); pages need `npm run lint && npm run build` locally.

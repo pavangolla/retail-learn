@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { Suspense } from "react";
+import { CartLink, CartLinkFallback } from "./CartLink";
 
 // The main navigation is a short hand-picked list of collection handles. The
 // home page lists every collection straight from the API.
@@ -41,6 +43,9 @@ export function Header() {
             Search
           </button>
         </form>
+        <Suspense fallback={<CartLinkFallback />}>
+          <CartLink />
+        </Suspense>
       </div>
     </header>
   );
